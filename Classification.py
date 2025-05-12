@@ -21,8 +21,6 @@ final_df = about_df.copy()
 
 
 
-
-
 # Pivoting our Odds data set so that rows with the same fight ID are joined
 odds_df["fighter_role"] = odds_df.groupby("fight_id").cumcount()
 
@@ -55,6 +53,54 @@ merged = merged.rename(columns={col: f"{col}_B" for col in final_df.columns if c
 
 # Dropping rows without both fighter's data
 merged.dropna(subset=["division_A", "division_B"], inplace=True)
+
+
+
+# Testing on a Random Forest model, to check our concern over model complexity against the size of our dataset.
+
+
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
+
+merged = merged.rename(columns={"large_movement_fighter_A": "large_odds_movement"})
+
+features = [
+    'Age_A', 'Age_B', 'Height_A', 'Height_B', 'Reach_A', 'Reach_B',
+    'start_prob_fighter_A', 'start_prob_fighter_B',
+    'avg_spread_across_books_fighter_A', 'avg_spread_across_books_fighter_B',
+    'avg_num_books_fighter_A', 'time_to_fight_hrs_fighter_A'
+]
+
+categorical = ['division_A', 'division_B', 'Status_A', 'Status_B']
+
+X = merged[features + categorical]
+y = merged["large_odds_movement"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=42)
+
+preprocessor = ColumnTransformer([
+    ("num", StandardScaler(), features),
+    ("cat", OneHotEncoder(handle_unknown='ignore'), categorical)
+])
+
+clf = Pipeline([
+    ("prep", preprocessor),
+    ("model", RandomForestClassifier(random_state=42))
+])
+
+clf.fit(X_train, y_train)
+
+y_pred = clf.predict(X_test)
+print(classification_report(y_test, y_pred))
+
+
+
+
+
 
 
 
@@ -143,11 +189,30 @@ clf = Pipeline([
     ))
 ])
 
+## Producing our caibration curve
+
 from sklearn.metrics import classification_report
 
 clf.fit(X_train, y_train)
 
 y_pred = clf.predict(X_test)
 print(classification_report(y_test, y_pred))
+
+from sklearn.calibration import calibration_curve
+import matplotlib.pyplot as plt
+
+pred_probs = clf.predict_proba(X_test)[:, 1]
+
+prob_true, prob_pred = calibration_curve(y_test, pred_probs, n_bins=10)
+
+plt.figure(figsize=(8, 6))
+plt.plot(prob_pred, prob_true, marker='o', label='Logistic Regression CV')
+plt.plot([0, 1], [0, 1], linestyle='--', label='Perfect Calibration')
+plt.xlabel("Predicted Probability")
+plt.ylabel("Empirical Probability")
+plt.title("Calibration Curve — Cross-Validated Logistic Regression")
+plt.legend()
+plt.grid(True)
+plt.show()
 
 
